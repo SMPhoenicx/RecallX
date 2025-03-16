@@ -9,53 +9,66 @@ import Foundation
 import Combine
 
 class RecallViewModel: ObservableObject {
-    @Published var recalls: [Recall] = []
-    
+    @Published var recalls: [Recall] = [] // Displayed recalls
+    private var allRecalls: [Recall] = [] // Full dataset
+    private let batchSize = 25 // Number of recalls per page
+    private var currentIndex = 0 // Tracks loaded items
+
     func fetchRecalls() {
-        // The API endpoint provided:
-        guard let url = URL(string: "http://www.saferproducts.gov/RestWebServices/Recall?Title=Child&RecallDescription=metal&format=Json") else {
+        guard allRecalls.isEmpty else { return } // Avoid duplicate fetches
+
+        guard let url = URL(string: "http://www.saferproducts.gov/RestWebServices/Recall?format=Json") else {
             print("Invalid URL")
             return
         }
-        
+
         URLSession.shared.dataTask(with: url) { data, response, error in
             if let error = error {
                 print("Error fetching recalls: \(error.localizedDescription)")
                 return
             }
-            
+
             guard let data = data else {
                 print("No data received")
                 return
             }
-            
+
             do {
                 let decoder = JSONDecoder()
-                // Uncomment the line below if you wish to use ISO8601 dates:
-                // decoder.dateDecodingStrategy = .iso8601
                 let recalls = try decoder.decode([Recall].self, from: data)
+
                 DispatchQueue.main.async {
-                    self.recalls = recalls
+                    self.allRecalls = recalls
+                    self.loadMoreRecalls() // Load first 25 recalls
                 }
             } catch {
                 print("Error decoding recalls: \(error)")
             }
         }.resume()
     }
+
+    func loadMoreRecalls() {
+        let nextIndex = min(currentIndex + batchSize, allRecalls.count)
+        if currentIndex < nextIndex {
+            recalls.append(contentsOf: allRecalls[currentIndex..<nextIndex])
+            currentIndex = nextIndex
+        }
+    }
 }
+
 
 struct Recall: Codable, Identifiable {
     // Use RecallID as the unique id.
     var id: Int { RecallID }
     let RecallID: Int
-    let RecallNumber: String
-    let RecallDate: String
-    let Description: String
-    let URL: String
-    let Title: String
+    let RecallNumber: String?
+    let RecallDate: String?
+    let Description: String?
+    let URL: String?
+    let Title: String?
     // Make ConsumerContact optional to allow for null values.
     let ConsumerContact: String?
-    let LastPublishDate: String
+    let LastPublishDate: String?
     let Products: [Product]
     let Inconjunctions: [Inconjunction]
     let Images: [RecallImage]
