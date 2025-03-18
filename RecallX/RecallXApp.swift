@@ -11,7 +11,8 @@ import SwiftUI
 struct RecallXApp: App {
     var body: some Scene {
         WindowGroup {
-            RecallListView()
+            MainTabView()
+            //RecallListView()
         }
     }
 }

@@ -10,7 +10,7 @@ import Combine
 
 class RecallViewModel: ObservableObject {
     @Published var recalls: [Recall] = [] // Displayed recalls
-    private var allRecalls: [Recall] = [] // Full dataset
+    @Published var allRecalls: [Recall] = [] // Full dataset
     private let batchSize = 25 // Number of recalls per page
     private var currentIndex = 0 // Tracks loaded items
 
