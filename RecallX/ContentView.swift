@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Foundation
+
 class SearchManager: ObservableObject {
     @Published var searchText: String = ""
     @Published var searchResults: [Recall] = []
@@ -34,7 +35,6 @@ class SearchManager: ObservableObject {
         
         isSearching = true
         
-        // Debounce implementation
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
             
@@ -51,31 +51,25 @@ class SearchManager: ObservableObject {
     private func filterRecalls(_ query: String) -> [Recall] {
         let lowercasedQuery = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // Early return if query is empty
         if lowercasedQuery.isEmpty {
             return []
         }
         
-        // First pass: exact title matches
+        // Exact and partial matches first
         let exactMatches = allRecalls.filter { recall in
             guard let title = recall.Title?.lowercased() else { return false }
             return title.contains(lowercasedQuery)
         }
         
-        // Second pass: related content matches (description, products)
         let relatedMatches = allRecalls.filter { recall in
-            // Skip if it's already an exact match
             if exactMatches.contains(where: { $0.id == recall.id }) {
                 return false
             }
             
-            // Check description
-            if let description = recall.Description?.lowercased(),
-               description.contains(lowercasedQuery) {
+            if let description = recall.Description?.lowercased(), description.contains(lowercasedQuery) {
                 return true
             }
             
-            // Check product names
             if recall.Products.contains(where: {
                 $0.Name.lowercased().contains(lowercasedQuery) ||
                 ($0.Description?.lowercased().contains(lowercasedQuery) ?? false)
@@ -83,99 +77,80 @@ class SearchManager: ObservableObject {
                 return true
             }
             
-            // Check hazards
-            if recall.Hazards.contains(where: {
-                $0.Name.lowercased().contains(lowercasedQuery)
-            }) {
+            if recall.Hazards.contains(where: { $0.Name.lowercased().contains(lowercasedQuery) }) {
                 return true
             }
             
             return false
         }
         
-        // Third pass: fuzzy matching for misspellings
+        // Improved fuzzy matching with dynamic threshold
         let fuzzyMatches = allRecalls.filter { recall in
-            // Skip if it's already matched
-            if exactMatches.contains(where: { $0.id == recall.id }) ||
-               relatedMatches.contains(where: { $0.id == recall.id }) {
+            if exactMatches.contains(where: { $0.id == recall.id }) || relatedMatches.contains(where: { $0.id == recall.id }) {
                 return false
             }
             
-            // Apply fuzzy matching to title
             if let title = recall.Title {
                 let fuzzyScore = calculateFuzzyScore(title, query: lowercasedQuery)
-                if fuzzyScore > 0.7 { // Threshold for fuzzy match
-                    return true
-                }
+                let threshold = max(0.5, 1.0 - (Double(lowercasedQuery.count) * 0.05)) // Dynamic threshold
+                return fuzzyScore > threshold
             }
             
             return false
         }
         
-        // Combine results with priority (exact matches first, then related, then fuzzy)
         return exactMatches + relatedMatches + fuzzyMatches
     }
     
-    // Calculate fuzzy match score between two strings (0-1)
+    // Optimized Levenshtein distance calculation for fuzzy matching
     private func calculateFuzzyScore(_ string: String, query: String) -> Double {
         let lowercasedString = string.lowercased()
-        
-        // Handle complete mismatch early
         if lowercasedString.isEmpty || query.isEmpty {
             return 0.0
         }
         
-        // Levenshtein distance calculation
         let stringLength = lowercasedString.count
         let queryLength = query.count
         
-        // Convert strings to arrays for easier character access
         let stringArray = Array(lowercasedString)
         let queryArray = Array(query)
         
-        // Create matrix for dynamic programming
         var matrix = Array(repeating: Array(repeating: 0, count: queryLength + 1), count: stringLength + 1)
         
-        // Initialize first row and column
         for i in 0...stringLength {
             matrix[i][0] = i
         }
-        
         for j in 0...queryLength {
             matrix[0][j] = j
         }
         
-        // Fill matrix
         for i in 1...stringLength {
             for j in 1...queryLength {
                 if stringArray[i-1] == queryArray[j-1] {
                     matrix[i][j] = matrix[i-1][j-1]
                 } else {
                     matrix[i][j] = min(
-                        matrix[i-1][j] + 1,      // deletion
-                        matrix[i][j-1] + 1,      // insertion
-                        matrix[i-1][j-1] + 1     // substitution
+                        matrix[i-1][j] + 1,  // deletion
+                        matrix[i][j-1] + 1,  // insertion
+                        matrix[i-1][j-1] + 1 // substitution
                     )
                 }
             }
         }
         
-        // Calculate similarity score (0-1)
         let distance = Double(matrix[stringLength][queryLength])
         let maxLength = Double(max(stringLength, queryLength))
-        let similarity = 1.0 - (distance / maxLength)
-        
-        return similarity
+        return 1.0 - (distance / maxLength)
     }
 }
 
 // MARK: - Recall Model Update - Add Equatable conformance
 extension Recall: Equatable {
     static func == (lhs: Recall, rhs: Recall) -> Bool {
-        // RecallID is the unique identifier, so comparing this is sufficient
         return lhs.RecallID == rhs.RecallID
     }
 }
+
 struct SearchResultsList: View {
     let recalls: [Recall]
     @EnvironmentObject var savedManager: SavedRecallsManager

@@ -12,41 +12,86 @@ class RecallViewModel: ObservableObject {
     @Published var recalls: [Recall] = [] // Displayed recalls
     @Published var allRecalls: [Recall] = [] // Full dataset
     private let batchSize = 25 // Number of recalls per page
+    private let maxRecalls = 200 // Limit number of recalls
     private var currentIndex = 0 // Tracks loaded items
-
+    
     func fetchRecalls() {
         guard allRecalls.isEmpty else { return } // Avoid duplicate fetches
-
-        guard let url = URL(string: "http://www.saferproducts.gov/RestWebServices/Recall?format=Json") else {
+        
+        let oneWeekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date())
+        let threeMonthsAgo = Calendar.current.date(byAdding: .month, value: -3, to: Date())
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let formattedRecentDate = dateFormatter.string(from: oneWeekAgo!)
+        let formattedBrandDate = dateFormatter.string(from: threeMonthsAgo!)
+        
+        guard let url = URL(string: "http://www.saferproducts.gov/RestWebServices/Recall?format=Json&LastPublishDateStart=\(formattedBrandDate)") else {
             print("Invalid URL")
             return
         }
-
+        
         URLSession.shared.dataTask(with: url) { data, response, error in
             if let error = error {
                 print("Error fetching recalls: \(error.localizedDescription)")
                 return
             }
-
+            
             guard let data = data else {
                 print("No data received")
                 return
             }
-
+            
             do {
                 let decoder = JSONDecoder()
-                let recalls = try decoder.decode([Recall].self, from: data)
-
+                var recalls = try decoder.decode([Recall].self, from: data)
+                
+                let popularBrands = [
+                    "Apple", "Samsung", "Tesla", "Toyota", "Sony", "LG", "Honda", "Ford", "Chevrolet", "BMW", "Nike", "Adidas", "Under Armour", "North Face", "Patagonia",
+                    "Hydro Flask", "Yeti", "Stanley", "PepsiCo", "Coca-Cola", "Frito-Lay", "Nestlé", "Procter & Gamble", "Johnson & Johnson", "Unilever", "Colgate-Palmolive",
+                    "Keurig Dr Pepper", "General Mills", "Kellogg's", "Mondelez", "Mars", "Clorox", "3M", "Dyson", "Whirlpool", "KitchenAid", "Black+Decker", "DeWalt", "Makita",
+                    "Energizer", "Duracell", "HP", "Dell", "Lenovo", "Microsoft", "Google", "Amazon", "Nintendo", "PlayStation", "Xbox"
+                ]
+                
+                // Get brand recalls first
+                var brandRecalls = recalls.filter { recall in
+                    recall.Manufacturers.contains { popularBrands.contains($0.Name) }
+                }
+                
+                // Get recent recalls
+                let recentRecalls = recalls.filter { recall in
+                    if let dateStr = recall.LastPublishDate, let date = dateFormatter.date(from: dateStr) {
+                        return date >= oneWeekAgo!
+                    }
+                    return false
+                }
+                
+                // Filter relevant product types AFTER brand/recent filtering
+                let relevantTypes = ["Electronics", "Automobile", "Household", "Toys", "Food", "Appliances", "Outdoor Equipment", "Sports", "Furniture", "Clothing", "Baby Products", "Health & Beauty"]
+                brandRecalls = brandRecalls.filter { recall in
+                    recall.Products.contains { product in
+                        if let type = product.Types {
+                            return relevantTypes.contains(where: { type.localizedCaseInsensitiveContains($0) })
+                        }
+                        return false
+                    }
+                }
+                
+                // Merge both lists, ensuring we get at least some recalls
+                var finalRecalls = Array((recentRecalls + brandRecalls).prefix(self.maxRecalls))
+                if finalRecalls.isEmpty {
+                    finalRecalls = Array(recalls.prefix(self.maxRecalls)) // Fallback to some data
+                }
+                
                 DispatchQueue.main.async {
-                    self.allRecalls = recalls
-                    self.loadMoreRecalls() // Load first 25 recalls
+                    self.allRecalls = finalRecalls
+                    self.loadMoreRecalls() // Load first batch
                 }
             } catch {
                 print("Error decoding recalls: \(error)")
             }
         }.resume()
     }
-
+    
     func loadMoreRecalls() {
         let nextIndex = min(currentIndex + batchSize, allRecalls.count)
         if currentIndex < nextIndex {
@@ -55,6 +100,8 @@ class RecallViewModel: ObservableObject {
         }
     }
 }
+
+
 
 
 struct Recall: Codable, Identifiable {
